@@ -4,15 +4,23 @@ const crypto = require('crypto');
 const AdmZip = require('adm-zip');
 const tmp = require('tmp');
 const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
-const db = require('../models/db');
+const prisma = require('../models/db');
 const config = require('../config');
 const { uploadBuffer } = require('../services/storageService');
 const { pushProjectDirectory, forkRepo } = require('../services/githubService');
 const { requestAnalysis } = require('../services/aiService');
 
-function listProjects(req, res) {
-  const rows = db.prepare('SELECT id, title, description, bot_repo_full_name, ai_summary, keywords, created_at FROM projects ORDER BY id DESC').all();
-  res.json({ projects: rows });
+async function listProjects(req, res) {
+  try {
+    const rows = await prisma.project.findMany({
+      select: { id: true, title: true, description: true, botRepoFullName: true, aiSummary: true, keywords: true, createdAt: true },
+      orderBy: { id: 'desc' }
+    });
+    res.json({ projects: rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to list projects' });
+  }
 }
 
 async function uploadZip(req, res) {
@@ -33,9 +41,8 @@ async function uploadZip(req, res) {
   const repoName = `${req.user.id}_${random}`;
   const fullName = await pushProjectDirectory(tempDir, repoName);
 
-  const info = db.prepare('INSERT INTO projects (owner_user_id, bot_repo_full_name, title) VALUES (?,?,?)')
-    .run(req.user.id, fullName, req.file.originalname.replace(/\.zip$/i,'').slice(0,80));
-  res.json({ projectId: info.lastInsertRowid, repo: fullName });
+  const project = await prisma.project.create({ data: { ownerUserId: req.user.id, botRepoFullName: fullName, title: req.file.originalname.replace(/\.zip$/i,'').slice(0,80) }, select: { id: true } });
+  res.json({ projectId: project.id, repo: fullName });
 }
 
 async function uploadGitHubUrl(req, res) {
@@ -49,9 +56,8 @@ async function uploadGitHubUrl(req, res) {
   await fs.promises.rm(path.join(tempDir, '.git'), { recursive: true, force: true });
   const repoName = `${req.user.id}_${crypto.randomBytes(3).toString('hex')}`;
   const fullName = await pushProjectDirectory(tempDir, repoName);
-  const info = db.prepare('INSERT INTO projects (owner_user_id, original_repo_url, bot_repo_full_name, title) VALUES (?,?,?,?)')
-    .run(req.user.id, url, fullName, title || repoName);
-  res.json({ projectId: info.lastInsertRowid, repo: fullName });
+  const project = await prisma.project.create({ data: { ownerUserId: req.user.id, originalRepoUrl: url, botRepoFullName: fullName, title: title || repoName }, select: { id: true } });
+  res.json({ projectId: project.id, repo: fullName });
 }
 
 // Helper to stream S3 body to buffer
@@ -101,7 +107,7 @@ async function uploadS3Zip(req, res) {
   if (!s3Url) return res.status(400).json({ error: 'projectFileUrl required' });
   if (!/\.zip($|\?)/i.test(s3Url)) return res.status(400).json({ error: 'URL must reference a .zip' });
   // Auth optional: fall back to anonymous user id 0 if not provided
-  const userId = (req.user && req.user.id) || db.anonymousUserId;
+  const userId = (req.user && req.user.id) || prisma.anonymousUserId;
   let parsed;
   try { parsed = parseS3ObjectUrl(s3Url); } catch (e) { return res.status(400).json({ error: e.message }); }
   const region = config.s3.region || process.env.S3_REGION;
@@ -143,28 +149,26 @@ async function uploadS3Zip(req, res) {
   const repoName = `${(req.user && req.user.id) ? req.user.id : 'anon'}_${crypto.randomBytes(3).toString('hex')}`;
     const fullName = await pushProjectDirectory(tempDir, repoName);
     // Insert project metadata
-    const insert = db.prepare(`INSERT INTO projects (
-      owner_user_id, original_repo_url, bot_repo_full_name, title, description, category, languages,
-      reason_halted, documentation_url, demo_url, s3_object_key, s3_object_url, source_type
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-    const languagesVal = Array.isArray(body.languages)
-      ? JSON.stringify(body.languages)
+    const languagesVal = Array.isArray(body.languages) ? JSON.stringify(body.languages)
       : (body.languages ? JSON.stringify([body.languages]) : null);
-    const projectRow = insert.run(
-  userId,
-      s3Url,
-      fullName,
-      (body.title || repoName).slice(0,80),
-      body.description || null,
-      body.category || null,
-      languagesVal,
-      body.reasonHalted || null,
-      body.documentation || body.documentationUrl || null,
-      body.demo || body.demoUrl || null,
-      body.projectFileKey || parsed.key,
-      s3Url,
-      's3_zip'
-    );
+    const project = await prisma.project.create({
+      data: {
+        ownerUserId: userId,
+        originalRepoUrl: s3Url,
+        botRepoFullName: fullName,
+        title: (body.title || repoName).slice(0,80),
+        description: body.description || null,
+        category: body.category || null,
+        languages: languagesVal,
+        reasonHalted: body.reasonHalted || null,
+        documentationUrl: body.documentation || body.documentationUrl || null,
+        demoUrl: body.demo || body.demoUrl || null,
+        s3ObjectKey: body.projectFileKey || parsed.key,
+        s3ObjectUrl: s3Url,
+        sourceType: 's3_zip'
+      },
+      select: { id: true }
+    });
     // Optional AI
     let report = null;
     const analyze = body.analyze !== undefined ? !!body.analyze : true;
@@ -173,10 +177,17 @@ async function uploadS3Zip(req, res) {
         report = await requestAnalysis(fullName);
         const summary = report.summary || null;
         const keywords = Array.isArray(report.keywords) ? report.keywords.join(',') : (report.keywords || null);
-        db.prepare('UPDATE projects SET ai_summary=?, ai_health=?, ai_next_steps=?, ai_last_generated_at=CURRENT_TIMESTAMP, keywords=? WHERE id=?')
-          .run(summary, JSON.stringify(report.health||null), JSON.stringify(report.next_steps||null), keywords, projectRow.lastInsertRowid);
-        db.prepare('INSERT INTO ai_reports (project_id, report) VALUES (?,?)')
-          .run(projectRow.lastInsertRowid, JSON.stringify(report));
+        await prisma.project.update({
+          where: { id: project.id },
+          data: {
+            aiSummary: summary,
+            aiHealth: report.health || null,
+            aiNextSteps: report.next_steps || null,
+            aiLastGeneratedAt: new Date(),
+            keywords
+          }
+        });
+        await prisma.aiReport.create({ data: { projectId: project.id, report } });
       } catch (e) {
         console.error('AI analysis failed:', e.message);
       }
@@ -184,7 +195,7 @@ async function uploadS3Zip(req, res) {
     const repoUrl = `https://github.com/${fullName}`;
     console.log("Analysis completed ....")
     res.json({
-      projectId: projectRow.lastInsertRowid,
+      projectId: project.id,
       repo: fullName,
       repoUrl,
       analyzed: !!report,
@@ -209,19 +220,23 @@ async function uploadS3Zip(req, res) {
 
 async function analyzeProject(req, res) {
   const id = Number(req.params.id);
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  const project = await prisma.project.findUnique({ where: { id } });
   if (!project) return res.status(404).json({ error: 'Project not found' });
-  if (project.owner_user_id !== req.user.id) {
+  if (project.ownerUserId !== req.user.id) {
     // allow any authenticated user for now
   }
   try {
-    const report = await requestAnalysis(project.bot_repo_full_name);
+  const report = await requestAnalysis(project.botRepoFullName);
     const summary = report.summary || report.project_summary || null;
     const keywords = Array.isArray(report.keywords) ? report.keywords.join(',') : (report.keywords || null);
-    db.prepare('UPDATE projects SET ai_summary=?, ai_health=?, ai_next_steps=?, ai_last_generated_at=CURRENT_TIMESTAMP, keywords=? WHERE id=?')
-      .run(summary, JSON.stringify(report.health||null), JSON.stringify(report.next_steps||null), keywords, id);
-    db.prepare('INSERT INTO ai_reports (project_id, report) VALUES (?,?)')
-      .run(id, JSON.stringify(report));
+    await prisma.project.update({ where: { id }, data: {
+      aiSummary: summary,
+      aiHealth: report.health || null,
+      aiNextSteps: report.next_steps || null,
+      aiLastGeneratedAt: new Date(),
+      keywords
+    }});
+    await prisma.aiReport.create({ data: { projectId: id, report } });
     res.json({ report });
   } catch (e) {
     console.error(e);
@@ -229,21 +244,19 @@ async function analyzeProject(req, res) {
   }
 }
 
-function adoptProject(req, res) {
+async function adoptProject(req, res) {
   const id = Number(req.params.id);
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
-  if (!project) return res.status(404).json({ error: 'Not found' });
-  const newName = `${project.bot_repo_full_name.split('/')[1]}_adopt_${req.user.id}`.slice(0,90);
-  forkRepo(project.bot_repo_full_name, newName)
-    .then(fullName => {
-      const info = db.prepare('INSERT INTO adoptions (project_id, adopter_user_id, fork_full_name) VALUES (?,?,?)')
-        .run(id, req.user.id, fullName);
-      res.json({ adoptionId: info.lastInsertRowid, fork: fullName });
-    })
-    .catch(e => {
-      console.error(e);
-      res.status(500).json({ error: 'Fork failed', detail: e.message });
-    });
+  try {
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project) return res.status(404).json({ error: 'Not found' });
+    const newName = `${project.botRepoFullName.split('/')[1]}_adopt_${req.user.id}`.slice(0,90);
+    const fullName = await forkRepo(project.botRepoFullName, newName);
+    const adoption = await prisma.adoption.create({ data: { projectId: id, adopterUserId: req.user.id, forkFullName: fullName }, select: { id: true } });
+    res.json({ adoptionId: adoption.id, fork: fullName });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Fork failed', detail: e.message });
+  }
 }
 
 module.exports = { listProjects, uploadZip, uploadGitHubUrl, analyzeProject, adoptProject, uploadS3Zip };

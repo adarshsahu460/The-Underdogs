@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  USER
+  ANONYMOUS
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String?
+  role         Role      @default(USER)
+  passwordHash String?   // nullable to allow system users without password
+  projects     Project[] @relation("UserProjects")
+  adoptions    Adoption[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Project {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  repoUrl     String?
+  owner       User        @relation("UserProjects", fields: [ownerId], references: [id])
+  ownerId     String
+  adoptions   Adoption[]
+  aiReports   AiReport[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([ownerId])
+}
+
+model Adoption {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  project   Project  @relation(fields: [projectId], references: [id])
+  projectId String
+  status    String   @default("PENDING")
+  createdAt DateTime @default(now())
+
+  @@unique([userId, projectId])
+  @@index([projectId])
+}
+
+model AiReport {
+  id        String   @id @default(cuid())
+  project   Project  @relation(fields: [projectId], references: [id])
+  projectId String
+  kind      String
+  content   Json
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+}

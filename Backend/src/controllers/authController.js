@@ -1,27 +1,37 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const db = require('../models/db');
+const prisma = require('../models/db');
 const config = require('../config');
 
-function register(req, res) {
-  const { email, password, name } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'Email & password required' });
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-  if (existing) return res.status(409).json({ error: 'Email already registered' });
-  const password_hash = bcrypt.hashSync(password, 10);
-  const info = db.prepare('INSERT INTO users (email, password_hash, name) VALUES (?,?,?)').run(email, password_hash, name || null);
-  const token = jwt.sign({ sub: info.lastInsertRowid }, config.jwt.secret, { expiresIn: config.jwt.expiresIn });
-  res.json({ token });
+async function register(req, res) {
+  try {
+    const { email, password, name } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email & password required' });
+    const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (existing) return res.status(409).json({ error: 'Email already registered' });
+    const passwordHash = bcrypt.hashSync(password, 10);
+    const user = await prisma.user.create({ data: { email, passwordHash, name } });
+    const token = jwt.sign({ sub: user.id }, config.jwt.secret, { expiresIn: config.jwt.expiresIn });
+    res.json({ token });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Registration failed' });
+  }
 }
 
-function login(req, res) {
-  const { email, password } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'Email & password required' });
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-  if (!bcrypt.compareSync(password, user.password_hash)) return res.status(401).json({ error: 'Invalid credentials' });
-  const token = jwt.sign({ sub: user.id }, config.jwt.secret, { expiresIn: config.jwt.expiresIn });
-  res.json({ token });
+async function login(req, res) {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email & password required' });
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!bcrypt.compareSync(password, user.passwordHash)) return res.status(401).json({ error: 'Invalid credentials' });
+    const token = jwt.sign({ sub: user.id }, config.jwt.secret, { expiresIn: config.jwt.expiresIn });
+    res.json({ token });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Login failed' });
+  }
 }
 
 module.exports = { register, login };

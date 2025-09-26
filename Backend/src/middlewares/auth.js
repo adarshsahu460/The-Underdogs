@@ -1,9 +1,9 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
-const db = require('../models/db');
+const prisma = require('../models/db');
 
 function auth(required = true) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const header = req.headers.authorization || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (!token) {
@@ -11,10 +11,10 @@ function auth(required = true) {
       return next();
     }
     try {
-      const payload = jwt.verify(token, config.jwt.secret);
-      const user = db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(payload.sub);
-      if (!user) return res.status(401).json({ error: 'Invalid token user' });
-      req.user = user;
+  const payload = jwt.verify(token, config.jwt.secret);
+  const user = await prisma.user.findUnique({ where: { id: payload.sub }, select: { id: true, email: true, name: true } });
+  if (!user) return res.status(401).json({ error: 'Invalid token user' });
+  req.user = user;
       next();
     } catch (e) {
       console.error(e);

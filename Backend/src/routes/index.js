@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const authRoutes = require('./authRoutes');
 const projectRoutes = require('./projectRoutes');
-const db = require('../models/db');
+const prisma = require('../models/db');
 
 const router = Router();
 
@@ -17,12 +17,14 @@ router.use('/auth', authRoutes);
 router.use('/projects', projectRoutes);
 
 // WARNING: /list exposes entire DB (MVP/debug). Protect with auth in production.
-router.get('/list', (req, res) => {
+router.get('/list', async (req, res) => {
   try {
-    const users = db.prepare('SELECT id, email, name, created_at FROM users').all();
-    const projects = db.prepare(`SELECT * FROM projects ORDER BY id DESC`).all();
-    const aiReports = db.prepare('SELECT * FROM ai_reports ORDER BY id DESC').all();
-    const adoptions = db.prepare('SELECT * FROM adoptions ORDER BY id DESC').all();
+    const [users, projects, aiReports, adoptions] = await Promise.all([
+      prisma.user.findMany({ select: { id: true, email: true, name: true, createdAt: true } }),
+      prisma.project.findMany({ orderBy: { id: 'desc' } }),
+      prisma.aiReport.findMany({ orderBy: { id: 'desc' } }),
+      prisma.adoption.findMany({ orderBy: { id: 'desc' } })
+    ]);
     return res.json({ users, projects, aiReports, adoptions });
   } catch (e) {
     console.error('/list error', e);
