@@ -47,6 +47,11 @@ def read_project_files(path: str, max_chars: int = 15000) -> str:
 class AnalyzeRequest(BaseModel):
     repo_url: str
 
+class AnalyzeDiffRequest(BaseModel):
+    diff: str
+    previous_summary: str = ""
+    project_title: str = "Project"
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the EngiVerse AI Analyzer API!"}
@@ -140,3 +145,81 @@ def analyze_repository(request: AnalyzeRequest):
         # 6. Cleanup
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, onerror=remove_readonly)
+
+@app.post("/analyze-diff")
+def analyze_diff(request: AnalyzeDiffRequest):
+    """
+    Analyzes a git diff and provides insights about the contribution.
+    Expected to return JSON with contribution_summary, updated_project_summary, and next_steps.
+    """
+    try:
+        # Prepare the prompt for analyzing the diff
+        diff_prompt = f"""
+        You are an expert developer analyzing a code contribution (git diff) for a project called "{request.project_title}".
+        
+        <CONTEXT>
+        <PREVIOUS_PROJECT_SUMMARY>
+        {request.previous_summary if request.previous_summary else "No previous project summary available."}
+        </PREVIOUS_PROJECT_SUMMARY>
+        
+        <GIT_DIFF>
+        {request.diff}
+        </GIT_DIFF>
+        </CONTEXT>
+        
+        <INSTRUCTIONS>
+        Analyze this contribution and generate a JSON object with exactly these keys:
+        - "contribution_summary": A concise 1-2 sentence summary of what this contribution does (e.g., "Added user authentication system with login/logout functionality").
+        - "updated_project_summary": An updated version of the project summary that incorporates this contribution. If no previous summary exists, create a new one based on the diff.
+        - "next_steps": An array of 2-3 specific, actionable next steps that would logically follow this contribution.
+        
+        Focus on:
+        - What functionality was added/modified/removed
+        - Technical significance of the changes
+        - How this moves the project forward
+        - Ignore trivial changes like formatting, comments, or config files unless they're substantial
+        
+        Return only the JSON object, no other text or markdown formatting.
+        </INSTRUCTIONS>
+        """
+        
+        # Get AI analysis
+        ai_response = llm.invoke(diff_prompt)
+        
+        # Parse the AI's response as JSON
+        try:
+            # Find and extract JSON object from response
+            start_index = ai_response.find('{')
+            end_index = ai_response.rfind('}') + 1
+            
+            if start_index != -1 and end_index != 0:
+                json_string = ai_response[start_index:end_index]
+                result = json.loads(json_string)
+            else:
+                raise json.JSONDecodeError("No JSON object found", ai_response, 0)
+            
+            # Validate required fields exist
+            if "contribution_summary" not in result:
+                result["contribution_summary"] = "Code changes detected"
+            if "updated_project_summary" not in result:
+                result["updated_project_summary"] = request.previous_summary or "Project with recent contributions"
+            if "next_steps" not in result:
+                result["next_steps"] = ["Continue development", "Add tests", "Update documentation"]
+                
+            return result
+            
+        except json.JSONDecodeError:
+            # Fallback response if JSON parsing fails
+            return {
+                "contribution_summary": "Unable to parse contribution details",
+                "updated_project_summary": request.previous_summary or "Project with recent changes",
+                "next_steps": ["Review code changes", "Add documentation", "Test functionality"],
+                "raw_ai_response": ai_response
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error analyzing diff: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

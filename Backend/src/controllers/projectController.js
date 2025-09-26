@@ -23,6 +23,17 @@ async function listProjects(req, res) {
   }
 }
 
+// Raw list with all columns (use with care; no field filtering)
+async function listProjectsRaw(req, res) {
+  try {
+    const rows = await prisma.project.findMany({ orderBy: { createdAt: 'desc' } });
+    res.json({ projects: rows });
+  } catch (e) {
+    console.error('[listProjectsRaw]', e);
+    res.status(500).json({ error: 'Failed to list projects raw' });
+  }
+}
+
 async function uploadZip(req, res) {
   if (!req.file) return res.status(400).json({ error: 'ZIP file required (field "file")' });
   // Save file to storage (S3/local)
@@ -175,14 +186,24 @@ async function uploadS3Zip(req, res) {
     if (analyze) {
       try {
         report = await requestAnalysis(fullName);
-        const summary = report.summary || null;
+        let summaryRaw = report.summary || null;
+        // If summary is an object (structured JSON), keep a compact string version for the aiSummary field
+        let summary = null;
+        if (summaryRaw) {
+          if (typeof summaryRaw === 'string') {
+            summary = summaryRaw;
+          } else {
+            try { summary = JSON.stringify(summaryRaw); } catch { summary = String(summaryRaw); }
+          }
+        }
         const keywords = Array.isArray(report.keywords) ? report.keywords.join(',') : (report.keywords || null);
+        const nextSteps = report.summary?.suggested_roadmap ? Array.isArray(report.summary.suggested_roadmap) ? report.summary.suggested_roadmap.join('\n') : String(report.summary.suggested_roadmap) : (report.next_steps || report.nextSteps || null);
         await prisma.project.update({
           where: { id: project.id },
           data: {
             aiSummary: summary,
             aiHealth: report.health || null,
-            aiNextSteps: report.next_steps || null,
+            aiNextSteps: nextSteps,
             aiLastGeneratedAt: new Date(),
             keywords
           }
@@ -259,4 +280,4 @@ async function adoptProject(req, res) {
   }
 }
 
-module.exports = { listProjects, uploadZip, uploadGitHubUrl, analyzeProject, adoptProject, uploadS3Zip };
+module.exports = { listProjects, listProjectsRaw, uploadZip, uploadGitHubUrl, analyzeProject, adoptProject, uploadS3Zip };

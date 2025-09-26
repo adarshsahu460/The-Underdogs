@@ -31,6 +31,10 @@ module.exports = {
     baseUrl: process.env.AI_SERVER_BASE_URL,
     apiKey: process.env.AI_SERVER_API_KEY
   },
+  contributions: {
+    // Max characters of unified diff sent to AI to avoid huge prompts
+    diffMaxChars: Number(process.env.CONTRIB_DIFF_MAX_CHARS || 200_000)
+  },
   uploads: {
     maxMb: Number(process.env.MAX_UPLOAD_MB || 200),
     tempDir: path.join(process.cwd(), 'tmp')
