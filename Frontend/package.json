@@ -12,6 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@pinata/sdk": "^2.1.0",
     "@supabase/supabase-js": "^2.57.4",
     "@types/multer": "^2.0.0",
     "aws-sdk": "^2.1692.0",

@@ -195,33 +195,72 @@ async function processUpload({ projectId, buffer, userId }) {
     const git = simpleGit({ baseDir: workDir });
     await git.clone(remoteAnon, workDir, ['--depth','50']);
     baseCommitReal = await git.revparse(['HEAD']);
-    // Wipe all except .git
-    const wipe = async (dir) => {
+
+    // Differential sync instead of destructive wipe to avoid false diffs for identical uploads
+    const listFiles = async (dir, relBase = '') => {
+      const out = [];
+      const ents = await fsp.readdir(dir, { withFileTypes: true });
+      for (const ent of ents) {
+        if (IGNORE_DIRS.has(ent.name) || IGNORE_FILES.has(ent.name)) continue;
+        if (ent.name === '.underdogs') continue;
+        const abs = path.join(dir, ent.name);
+        const rel = relBase ? `${relBase}/${ent.name}` : ent.name;
+        if (ent.isDirectory()) {
+          out.push(...(await listFiles(abs, rel)));
+        } else if (ent.isFile()) {
+          out.push(rel);
+        }
+      }
+      return out;
+    };
+
+    const newFiles = new Set(await listFiles(rootDir));
+
+    // Remove files in repo not present in new upload
+    const removeExtraneous = async (dir, relBase='') => {
       const ents = await fsp.readdir(dir, { withFileTypes: true });
       for (const ent of ents) {
         if (ent.name === '.git') continue;
-        await fsp.rm(path.join(dir, ent.name), { recursive: true, force: true });
+        if (IGNORE_DIRS.has(ent.name) || IGNORE_FILES.has(ent.name)) continue;
+        if (ent.name === '.underdogs') continue;
+        const abs = path.join(dir, ent.name);
+        const rel = relBase ? `${relBase}/${ent.name}` : ent.name;
+        if (ent.isDirectory()) {
+          await removeExtraneous(abs, rel);
+          // Clean up dir if empty afterwards (optional)
+          try {
+            const remain = await fsp.readdir(abs);
+            if (!remain.length) await fsp.rmdir(abs);
+          } catch {/* ignore */}
+        } else if (ent.isFile()) {
+          if (!newFiles.has(rel)) {
+            await fsp.rm(abs, { force: true });
+          }
+        }
       }
     };
-    await wipe(workDir);
-    // Copy new content (excluding .underdogs manifest)
-    const copyRecursive = async (src, dest) => {
+    await removeExtraneous(workDir);
+
+    // Copy / overwrite new files
+    const copyIn = async (src, dest) => {
       const ents = await fsp.readdir(src, { withFileTypes: true });
       for (const ent of ents) {
         if (IGNORE_DIRS.has(ent.name) || IGNORE_FILES.has(ent.name)) continue;
-        if (ent.name === '.underdogs') continue; // never push manifest folder
+        if (ent.name === '.underdogs') continue;
         const s = path.join(src, ent.name);
         const d = path.join(dest, ent.name);
         if (ent.isDirectory()) {
           await fsp.mkdir(d, { recursive: true });
-          await copyRecursive(s, d);
+          await copyIn(s, d);
         } else if (ent.isFile()) {
+          // Overwrite; git will detect unchanged content and ignore
+            await fsp.mkdir(path.dirname(d), { recursive: true });
           await fsp.copyFile(s, d);
         }
       }
     };
-    await copyRecursive(rootDir, workDir);
-    await git.add('.');
+    await copyIn(rootDir, workDir);
+    await git.add(['-A']);
     const commitMsg = `Contribution session ${session.id || idemKey}`;
     // Only commit if there are staged changes
     const status = await git.status();

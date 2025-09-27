@@ -1,4 +1,3 @@
-import React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Code, Users, Zap, Search, Upload, TrendingUp } from 'lucide-react';
 
