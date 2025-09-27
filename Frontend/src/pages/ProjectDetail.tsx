@@ -80,6 +80,36 @@ const ProjectDetail = () => {
   type FeedbackItem = { text: string; user: string; createdAt: string };
   const [localFeedback, setLocalFeedback] = useState<FeedbackItem[]>([]);
 
+  // Helper: extract a YouTube embed URL from common YouTube link formats
+  const getYouTubeEmbedUrl = (rawUrl?: string | null): string | null => {
+    if (!rawUrl) return null;
+    try {
+      const url = new URL(rawUrl);
+      let id: string | null = null;
+      const host = url.hostname.toLowerCase();
+      if (host.includes("youtu.be")) {
+        // https://youtu.be/<id>
+        id = url.pathname.replace("/", "").split("/")[0] || null;
+      } else if (host.includes("youtube.com")) {
+        // https://www.youtube.com/watch?v=<id>
+        if (url.pathname === "/watch") {
+          id = url.searchParams.get("v");
+        }
+        // https://www.youtube.com/embed/<id>
+        if (!id && url.pathname.startsWith("/embed/")) {
+          id = url.pathname.split("/embed/")[1]?.split("/")[0] || null;
+        }
+        // https://www.youtube.com/shorts/<id>
+        if (!id && url.pathname.startsWith("/shorts/")) {
+          id = url.pathname.split("/shorts/")[1]?.split("/")[0] || null;
+        }
+      }
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    } catch {
+      return null;
+    }
+  };
+
   const parseAIInsights = (value: unknown): AIInsights | null => {
     if (!value) return null;
     if (typeof value === "object") return value as AIInsights;
@@ -424,7 +454,7 @@ const ProjectDetail = () => {
                 {project.title}
               </h1>
 
-              <div className="flex flex-wrap gap-6 text-sm text-gray-600 mb-6">
+              <div className="flex flex-wrap gap-6 text-sm text-gray-600 mb-4">
                 <div className="flex items-center">
                   <Calendar className="h-4 w-4 mr-2" />
                   Created {formatDate(project.createdAt)}
@@ -446,6 +476,40 @@ const ProjectDetail = () => {
                   Halted: {project.reasonHalted}
                 </div>
               </div>
+
+              {/* YouTube Demo Embed (if a YouTube link was provided as demo) */}
+              {(() => {
+                const demoUrl = project.links?.demo;
+                const yt = getYouTubeEmbedUrl(demoUrl || null);
+                // Optional: simple fallback for direct video links
+                const isDirectVideo =
+                  !!demoUrl && /\.(mp4|webm|ogg)(\?.*)?$/i.test(demoUrl);
+                if (yt) {
+                  return (
+                    <div className="mb-6">
+                      <div className="relative w-full max-w-3xl px-10 mx-auto pb-[56.25%] overflow-hidden border border-gray-300 shadow rounded-sm" >
+                        <iframe
+                          title="Project demo video"
+                          src={yt}
+                          className="absolute inset-0 w-full h-full"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                          allowFullScreen
+                        />
+                      </div>
+                    </div>
+                  );
+                }
+                if (isDirectVideo) {
+                  return (
+                    <div className="mb-6">
+                      <div className="w-full max-w-xl mx-auto border border-gray-200 shadow">
+                        <video className="w-full" src={demoUrl!} controls />
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               <div className="flex flex-wrap gap-2 mb-6">
                 {getLanguagesArray(project.languages).map((language, index) => (

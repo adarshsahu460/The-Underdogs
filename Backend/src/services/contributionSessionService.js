@@ -190,10 +190,10 @@ async function processUpload({ projectId, buffer, userId }) {
   let headCommit = '';
   let baseCommitReal = '';
   try {
-    const remoteAnon = `https://github.com/${fullName}.git`;
-    const workDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'udg_commit_'));
-    const git = simpleGit({ baseDir: workDir });
-    await git.clone(remoteAnon, workDir, ['--depth','50']);
+  const remote = `https://github.com/${fullName}.git`;
+  const workDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'udg_commit_'));
+  const git = simpleGit({ baseDir: workDir });
+  await git.clone(remote, workDir, ['--depth','50']);
     baseCommitReal = await git.revparse(['HEAD']);
 
     // Differential sync instead of destructive wipe to avoid false diffs for identical uploads

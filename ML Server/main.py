@@ -131,8 +131,10 @@ def analyze_repository(request: AnalyzeRequest):
             summary_json = {"error": "Failed to parse AI summary.", "raw_response": summary_text}
 
         # 5. Combine and Return Results
+        # Provide backward-compatible alias 'health'
         return {
             "health_report": health_report,
+            "health": health_report,
             "summary": summary_json
         }
 

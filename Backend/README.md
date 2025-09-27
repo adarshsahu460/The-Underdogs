@@ -22,12 +22,16 @@ Conventions
 - Add tests under a tests/ folder if needed
 
 Database (Prisma + PostgreSQL)
-- This project now uses Prisma ORM targeting a PostgreSQL database (e.g. Supabase).
-- Provide DATABASE_URL in your .env (Supabase connection string).
+- Provide DATABASE_URL in your .env (Supabase/Postgres connection string).
 - After installing dependencies run:
 	- npx prisma migrate deploy (or `migrate dev` locally)
 	- npx prisma generate (if not run automatically)
-- Anonymous user (anonymous@system.local) is ensured at startup for unauthenticated flows.
+
+Authentication (Clerk)
+- Incoming requests may include a Clerk session token (Authorization: Bearer <token>).
+- Middleware resolves Clerk user -> local User row via clerkUserId or email, creating if missing.
+- Legacy JWT fallback retained temporarily (remove when migration complete).
+- Added optional field clerkUserId (unique). Removed ANONYMOUS role and legacy anonymous bootstrap.
 
 Prisma files
 - prisma/schema.prisma — data model

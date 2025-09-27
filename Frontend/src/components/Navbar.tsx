@@ -1,6 +1,6 @@
-import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Code2, Upload, Search } from 'lucide-react';
+import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton } from '@clerk/clerk-react';
 
 const Navbar = () => {
   const location = useLocation();
@@ -44,6 +44,21 @@ const Navbar = () => {
               <Upload className="h-4 w-4" />
               <span>Upload Project</span>
             </Link>
+
+            {/* Auth Section */}
+            <div className="flex items-center space-x-3">
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button className="px-3 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md border border-blue-200">Sign In</button>
+                </SignInButton>
+                <SignUpButton mode="modal">
+                  <button className="px-3 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-md">Sign Up</button>
+                </SignUpButton>
+              </SignedOut>
+              <SignedIn>
+                <UserButton afterSignOutUrl="/" />
+              </SignedIn>
+            </div>
           </div>
         </div>
       </div>

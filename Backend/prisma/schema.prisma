@@ -10,7 +10,6 @@ datasource db {
 enum Role {
   ADMIN
   USER
-  ANONYMOUS
 }
 
 model User {
@@ -18,7 +17,8 @@ model User {
   email        String    @unique
   name         String?
   role         Role      @default(USER)
-  passwordHash String?   // nullable to allow system users without password
+  passwordHash String?   // legacy; can be removed once fully on Clerk
+  clerkUserId  String?   @unique
   projects     Project[] @relation("UserProjects")
   adoptions    Adoption[]
   contributions Contribution[]

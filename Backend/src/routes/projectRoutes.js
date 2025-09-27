@@ -2,7 +2,7 @@ const { Router } = require('express');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 const auth = require('../middlewares/auth');
-const { listProjects, listProjectsRaw, uploadS3Zip, getProject } = require('../controllers/projectController');
+const { listProjects, listProjectsRaw, uploadS3Zip, getProject, adoptProject, analyzeProject, getProjectHealth } = require('../controllers/projectController');
 const { analyzeContribution, getTimeline: legacyTimeline } = require('../controllers/contributionController');
 const contributionSessionController = require('../controllers/contributionSessionController');
 
@@ -11,6 +11,9 @@ const router = Router();
 router.get('/', auth(false), listProjects);
 router.get('/list', auth(false), listProjectsRaw);
 router.get('/:projectId', auth(false), getProject); // must appear before deeper nested :projectId routes
+router.get('/:projectId/health', auth(false), getProjectHealth);
+router.post('/:projectId/reanalyze', auth(false), analyzeProject);
+router.post('/:projectId/adopt', auth(true), adoptProject);
 
 // Phase 2 contribution sessions
 router.get('/:projectId/contributions/download', auth(false), contributionSessionController.initiateDownload);

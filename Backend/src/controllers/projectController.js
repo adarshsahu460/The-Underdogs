@@ -10,6 +10,51 @@ const { uploadBuffer } = require('../services/storageService');
 const { pushProjectDirectory, forkRepo } = require('../services/githubService');
 const { requestAnalysis } = require('../services/aiService');
 
+// Normalize raw AI analysis response from ML server into consistent fields
+function normalizeAiReport(report) {
+  if (!report || typeof report !== 'object') {
+    return {
+      summaryString: null,
+      summaryObject: null,
+      healthString: null,
+      nextSteps: null,
+      keywords: null
+    };
+  }
+  const summaryObj = report.summary && typeof report.summary === 'object' ? report.summary : null;
+  const summaryString = (() => {
+    if (!report.summary) return null;
+    if (typeof report.summary === 'string') return report.summary;
+    try { return JSON.stringify(report.summary); } catch { return String(report.summary); }
+  })();
+  // Health can be under health or health_report (FastAPI returns health_report)
+  let rawHealth = report.health || report.health_report || null;
+  let healthString = null;
+  if (rawHealth) {
+    if (typeof rawHealth === 'string') healthString = rawHealth;
+    else { try { healthString = JSON.stringify(rawHealth); } catch { healthString = String(rawHealth); } }
+  }
+  // Next steps roadmap may be nested in summary.suggested_roadmap
+  let nextSteps = null;
+  if (summaryObj && summaryObj.suggested_roadmap) {
+    if (Array.isArray(summaryObj.suggested_roadmap)) nextSteps = summaryObj.suggested_roadmap.join('\n');
+    else nextSteps = String(summaryObj.suggested_roadmap);
+  } else if (report.next_steps || report.nextSteps) {
+    const ns = report.next_steps || report.nextSteps;
+    nextSteps = Array.isArray(ns) ? ns.join('\n') : String(ns);
+  }
+  // Derive keywords from tech_stack if present
+  let keywords = null;
+  if (summaryObj && Array.isArray(summaryObj.tech_stack)) {
+    keywords = summaryObj.tech_stack.map(s => String(s).trim()).filter(Boolean).join(',');
+  } else if (Array.isArray(report.keywords)) {
+    keywords = report.keywords.join(',');
+  } else if (typeof report.keywords === 'string') {
+    keywords = report.keywords;
+  }
+  return { summaryString, summaryObject: summaryObj, healthString, nextSteps, keywords };
+}
+
 async function listProjects(req, res) {
   try {
     const rows = await prisma.project.findMany({
@@ -117,8 +162,8 @@ async function uploadS3Zip(req, res) {
   const s3Url = body.projectFileUrl || body.s3Url;
   if (!s3Url) return res.status(400).json({ error: 'projectFileUrl required' });
   if (!/\.zip($|\?)/i.test(s3Url)) return res.status(400).json({ error: 'URL must reference a .zip' });
-  // Auth optional: fall back to anonymous user id 0 if not provided
-  const userId = (req.user && req.user.id) || prisma.anonymousUserId;
+  // Auth optional: if not provided, userId null (must handle upstream if required)
+  const userId = (req.user && req.user.id) || null;
   let parsed;
   try { parsed = parseS3ObjectUrl(s3Url); } catch (e) { return res.status(400).json({ error: e.message }); }
   const region = config.s3.region || process.env.S3_REGION;
@@ -157,7 +202,7 @@ async function uploadS3Zip(req, res) {
     const zip = new AdmZip(zipBuffer);
     zip.extractAllTo(tempDir, true);
     // Repo naming
-  const repoName = `${(req.user && req.user.id) ? req.user.id : 'anon'}_${crypto.randomBytes(3).toString('hex')}`;
+  const repoName = `${(req.user && req.user.id) ? req.user.id : 'user'}_${crypto.randomBytes(3).toString('hex')}`;
     const fullName = await pushProjectDirectory(tempDir, repoName);
     // Insert project metadata
     const languagesVal = Array.isArray(body.languages) ? JSON.stringify(body.languages)
@@ -186,26 +231,15 @@ async function uploadS3Zip(req, res) {
     if (analyze) {
       try {
         report = await requestAnalysis(fullName);
-        let summaryRaw = report.summary || null;
-        // If summary is an object (structured JSON), keep a compact string version for the aiSummary field
-        let summary = null;
-        if (summaryRaw) {
-          if (typeof summaryRaw === 'string') {
-            summary = summaryRaw;
-          } else {
-            try { summary = JSON.stringify(summaryRaw); } catch { summary = String(summaryRaw); }
-          }
-        }
-        const keywords = Array.isArray(report.keywords) ? report.keywords.join(',') : (report.keywords || null);
-        const nextSteps = report.summary?.suggested_roadmap ? Array.isArray(report.summary.suggested_roadmap) ? report.summary.suggested_roadmap.join('\n') : String(report.summary.suggested_roadmap) : (report.next_steps || report.nextSteps || null);
+        const norm = normalizeAiReport(report);
         await prisma.project.update({
           where: { id: project.id },
           data: {
-            aiSummary: summary,
-            aiHealth: report.health || null,
-            aiNextSteps: nextSteps,
+            aiSummary: norm.summaryString,
+            aiHealth: norm.healthString,
+            aiNextSteps: norm.nextSteps,
             aiLastGeneratedAt: new Date(),
-            keywords
+            keywords: norm.keywords
           }
         });
         await prisma.aiReport.create({ data: { projectId: project.id, report } });
@@ -248,17 +282,16 @@ async function analyzeProject(req, res) {
   }
   try {
     const report = await requestAnalysis(project.botRepoFullName);
-    const summary = report.summary || report.project_summary || null;
-    const keywords = Array.isArray(report.keywords) ? report.keywords.join(',') : (report.keywords || null);
+    const norm = normalizeAiReport(report);
     await prisma.project.update({ where: { id }, data: {
-      aiSummary: summary,
-      aiHealth: report.health || null,
-      aiNextSteps: report.next_steps || null,
+      aiSummary: norm.summaryString,
+      aiHealth: norm.healthString,
+      aiNextSteps: norm.nextSteps,
       aiLastGeneratedAt: new Date(),
-      keywords
+      keywords: norm.keywords
     }});
     await prisma.aiReport.create({ data: { projectId: id, report } });
-    res.json({ report });
+    res.json({ report, normalized: norm });
   } catch (e) {
     console.error(e);
     res.status(502).json({ error: 'AI server failed', detail: e.message });
@@ -317,3 +350,36 @@ async function getProject(req, res) {
 }
 
 module.exports = { listProjects, listProjectsRaw, uploadZip, uploadGitHubUrl, analyzeProject, adoptProject, uploadS3Zip, getProject };
+// Additional helper to parse aiHealth string into structured object (for new health endpoint)
+function parseHealthString(str) {
+  if (!str) return null;
+  try {
+    return JSON.parse(str);
+  } catch {
+    return null;
+  }
+}
+
+// GET /api/projects/:projectId/health
+async function getProjectHealth(req, res) {
+  const projectId = req.params.projectId;
+  try {
+    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true, aiHealth: true, aiLastGeneratedAt: true } });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const parsed = parseHealthString(project.aiHealth);
+    // Derive simple readiness score if possible
+    let readiness = null;
+    if (parsed) {
+      const keys = ['readme_is_present','build_successful','tests_found_and_passed'];
+      let present = 0, total = 0;
+      keys.forEach(k => { if (k in parsed) { total++; if (parsed[k]) present++; }});
+      if (total > 0) readiness = present / total; // 0..1
+    }
+    return res.json({ projectId, health: parsed, readiness, generatedAt: project.aiLastGeneratedAt });
+  } catch (e) {
+    console.error('[getProjectHealth]', e);
+    return res.status(500).json({ error: 'Failed to load health', detail: e.message });
+  }
+}
+
+module.exports.getProjectHealth = getProjectHealth;
