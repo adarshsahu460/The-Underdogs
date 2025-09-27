@@ -259,7 +259,11 @@ async function processUpload({ projectId, buffer, userId }) {
   }
 
   const previousSummary = project.aiSummary || null;
-  const updatedProjectSummary = analysis.updatedProjectSummary || previousSummary;
+  // Ensure updated project summary is stored as a string (DB column is String?)
+  let updatedProjectSummary = analysis.updatedProjectSummary || previousSummary;
+  if (updatedProjectSummary && typeof updatedProjectSummary !== 'string') {
+    try { updatedProjectSummary = JSON.stringify(updatedProjectSummary); } catch { updatedProjectSummary = String(updatedProjectSummary); }
+  }
 
   const result = await prisma.$transaction(async (tx) => {
     const contribution = await tx.contribution.create({
@@ -275,8 +279,8 @@ async function processUpload({ projectId, buffer, userId }) {
         aiUpdatedProjectSummary: updatedProjectSummary
       }
     });
-    await tx.projectSummarySnapshot.create({ data: { projectId, contributionId: contribution.id, previousSummary, newSummary: updatedProjectSummary } });
-    await tx.project.update({ where: { id: projectId }, data: { aiSummary: updatedProjectSummary, aiNextSteps: normalizeNextSteps(analysis.nextSteps) || project.aiNextSteps, aiLastGeneratedAt: new Date() } });
+  await tx.projectSummarySnapshot.create({ data: { projectId, contributionId: contribution.id, previousSummary, newSummary: updatedProjectSummary } });
+  await tx.project.update({ where: { id: projectId }, data: { aiSummary: updatedProjectSummary, aiNextSteps: normalizeNextSteps(analysis.nextSteps) || project.aiNextSteps, aiLastGeneratedAt: new Date() } });
     await tx.contributionSession.update({ where: { id: session.id }, data: { resultContributionId: contribution.id, status: 'FINAL', archiveObjectKey: key } });
     return contribution;
   });

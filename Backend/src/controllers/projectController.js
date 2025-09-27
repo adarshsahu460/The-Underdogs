@@ -247,7 +247,7 @@ async function analyzeProject(req, res) {
     // allow any authenticated user for now
   }
   try {
-  const report = await requestAnalysis(project.botRepoFullName);
+    const report = await requestAnalysis(project.botRepoFullName);
     const summary = report.summary || report.project_summary || null;
     const keywords = Array.isArray(report.keywords) ? report.keywords.join(',') : (report.keywords || null);
     await prisma.project.update({ where: { id }, data: {
@@ -280,4 +280,40 @@ async function adoptProject(req, res) {
   }
 }
 
-module.exports = { listProjects, listProjectsRaw, uploadZip, uploadGitHubUrl, analyzeProject, adoptProject, uploadS3Zip };
+// GET /api/projects/:projectId - full project with related entities
+async function getProject(req, res) {
+  const projectId = req.params.projectId || req.params.id; // support either param naming
+  try {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        aiReports: { orderBy: { createdAt: 'desc' }, take: 20 },
+        contributions: { orderBy: { createdAt: 'desc' }, take: 50 },
+        snapshots: { orderBy: { createdAt: 'desc' }, take: 25 },
+        sessions: { orderBy: { createdAt: 'desc' }, take: 25 },
+        adoptions: true,
+        owner: { select: { id: true, email: true, name: true } }
+      }
+    });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    // Derive helpful parsed fields
+    let languages = [];
+    try { if (project.languages) languages = JSON.parse(project.languages); } catch { /* ignore */ }
+    const response = {
+      ...project,
+      languagesParsed: languages,
+      stats: {
+        contributionCount: project.contributions.length,
+        sessionCount: project.sessions.length,
+        adoptionCount: project.adoptions.length,
+        aiReportCount: project.aiReports.length
+      }
+    };
+    res.json(response);
+  } catch (e) {
+    console.error('[getProject]', e);
+    res.status(500).json({ error: 'Failed to load project', detail: e.message });
+  }
+}
+
+module.exports = { listProjects, listProjectsRaw, uploadZip, uploadGitHubUrl, analyzeProject, adoptProject, uploadS3Zip, getProject };

@@ -1,4 +1,5 @@
 const prisma = require('../models/db');
+const { analyzeContributionDiff } = require('../services/aiService');
 
 // GET /projects/:projectId/contributions/analyze-diff
 // Return diff between the latest and previous commit on main (no DB write)
@@ -25,7 +26,23 @@ async function analyzeContribution(req, res) {
     const headCommit = log.all[0].hash; // latest
     const baseCommit = log.all[1].hash; // previous
     const diffText = await git.diff([`${baseCommit}..${headCommit}`]);
-    res.json({ baseCommit, headCommit, diff: diffText || '# Empty diff' });
+
+    // Optional AI analysis (default ON unless ai=0 provided)
+    let ai = null;
+    const wantAI = req.query.ai !== '0' && req.query.ai !== 'false';
+    if (wantAI) {
+      try {
+        ai = await analyzeContributionDiff({
+          diff: diffText || '# Empty diff',
+          previousSummary: project.aiSummary || '',
+            projectTitle: project.title || project.name || 'Project'
+        });
+      } catch (e) {
+        ai = { error: e.message };
+      }
+    }
+
+    res.json({ baseCommit, headCommit, diff: diffText || '# Empty diff', ai });
   } catch (e) {
     console.error('[analyzeContribution]', e);
     res.status(500).json({ error: 'Failed to get main diff', detail: e.message });

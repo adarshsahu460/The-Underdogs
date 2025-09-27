@@ -115,20 +115,42 @@ def analyze_repository(request: AnalyzeRequest):
         
         summary_text = llm.invoke(summary_prompt)
 
-        # 4. Parse the AI's response as JSON (Robust version)
-        try:
-            # Find the start and end of the JSON object in the response
-            start_index = summary_text.find('{')
-            end_index = summary_text.rfind('}') + 1
-            
-            if start_index != -1 and end_index != 0:
-                json_string = summary_text[start_index:end_index]
-                summary_json = json.loads(json_string)
-            else:
-                # Raise an error if no JSON object is found
-                raise json.JSONDecodeError("No JSON object found in the response.", summary_text, 0)
+        # 4. Parse the AI's response as JSON (More robust w/ salvage heuristics)
+        def attempt_parse(raw: str):
+            start_index = raw.find('{')
+            end_index = raw.rfind('}') + 1
+            if start_index != -1 and end_index > start_index:
+                candidate = raw[start_index:end_index]
+                return json.loads(candidate)
+            raise json.JSONDecodeError("No JSON braces", raw, 0)
 
-        except json.JSONDecodeError:
+        def sanitize_fragment(fragment: str):
+            # Remove code fences/backticks and language hints
+            fragment = fragment.strip().strip('`')
+            fragment = fragment.replace('```json', '').replace('```', '')
+            # If it appears to start directly with a quoted key, wrap in braces.
+            trimmed = fragment.lstrip()
+            if trimmed.startswith('"pitch"') or trimmed.startswith('"problem_solved"'):
+                fragment = '{' + fragment
+            # Ensure ending brace
+            if not fragment.rstrip().endswith('}'):
+                fragment = fragment.rstrip().rstrip(',') + '\n}'
+            # Remove any trailing commas before closing brace (simple heuristic)
+            lines = []
+            for line in fragment.splitlines():
+                if line.rstrip().endswith(',') and line.strip().startswith('}'):
+                    line = line.rstrip().rstrip(',')
+                lines.append(line)
+            fragment = '\n'.join(lines)
+            return fragment
+
+        try:
+            try:
+                summary_json = attempt_parse(summary_text)
+            except json.JSONDecodeError:
+                salvaged = sanitize_fragment(summary_text)
+                summary_json = json.loads(salvaged)
+        except Exception:
             summary_json = {"error": "Failed to parse AI summary.", "raw_response": summary_text}
 
         # 5. Combine and Return Results
