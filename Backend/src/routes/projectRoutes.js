@@ -2,16 +2,19 @@ const { Router } = require('express');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 const auth = require('../middlewares/auth');
-const { listProjects, listProjectsRaw, uploadS3Zip, getProject, adoptProject, analyzeProject, getProjectHealth } = require('../controllers/projectController');
+const { listProjects, listProjectsRaw, uploadS3Zip, getProject, adoptProject, analyzeProject, getProjectHealth, searchProjects, getHealthTimeline, streamReanalyze } = require('../controllers/projectController');
 const { analyzeContribution, getTimeline: legacyTimeline } = require('../controllers/contributionController');
 const contributionSessionController = require('../controllers/contributionSessionController');
 
 const router = Router();
 
 router.get('/', auth(false), listProjects);
+router.get('/search', auth(false), searchProjects);
 router.get('/list', auth(false), listProjectsRaw);
 router.get('/:projectId', auth(false), getProject); // must appear before deeper nested :projectId routes
 router.get('/:projectId/health', auth(false), getProjectHealth);
+router.get('/:projectId/health/timeline', auth(false), getHealthTimeline);
+router.get('/:projectId/stream/reanalyze', auth(false), streamReanalyze);
 router.post('/:projectId/reanalyze', auth(false), analyzeProject);
 router.post('/:projectId/adopt', auth(true), adoptProject);
 
@@ -42,6 +45,7 @@ router.get('/:projectId/contributions/analyze-diff', auth(false), analyzeContrib
 router.get('/:projectId/contributions/timeline-legacy', auth(false), legacyTimeline);
 
 // S3 import
-router.post('/upload/s3', upload.none(), uploadS3Zip);
+// Protected: requires authentication so ownerUserId is always set
+router.post('/upload/s3', auth(true), upload.none(), uploadS3Zip);
 
 module.exports = router;

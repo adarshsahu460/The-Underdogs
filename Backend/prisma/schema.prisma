@@ -50,6 +50,7 @@ model Project {
   aiNextSteps       String?
   aiHealth          String?
   aiLastGeneratedAt DateTime?
+  searchVector      String?     // For full-text search (tsvector in PostgreSQL)
   adoptions         Adoption[]
   aiReports         AiReport[]
   contributions     Contribution[]

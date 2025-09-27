@@ -73,7 +73,7 @@ router.post("/", async (req, res) => {
       feedback: [],
       timeline: [
         {
-          milestone: "Project created and uploaded to EngiVerse",
+          milestone: "Project created and uploaded to Dev-Yard",
           date: req.body.createdAt || new Date().toISOString(),
           contributor: "Anonymous",
         },

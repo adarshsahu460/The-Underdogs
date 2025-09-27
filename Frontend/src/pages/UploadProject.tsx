@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useAuth } from '@clerk/clerk-react';
 import {
   Upload,
   Plus,
@@ -127,6 +128,8 @@ const UploadProject = () => {
     return { cid: ipfsResult.cid };
   };
 
+  const { getToken } = useAuth();
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -177,9 +180,13 @@ const UploadProject = () => {
       console.log("Sending project data to backend:", projectData);
 
       // Use the existing project creation endpoint
+      const token = await getToken().catch(() => null);
       const response = await fetch("https://debrah-transpleural-bailey.ngrok-free.dev/api/projects/upload/s3", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(projectData),
       });
 

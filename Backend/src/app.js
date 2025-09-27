@@ -4,6 +4,22 @@ const cors = require('cors');
 const fs = require('fs');
 const config = require('./config');
 const routes = require('./routes');
+// Clerk auth middleware (must be registered before any getAuth usage in downstream middlewares)
+let clerkReady = false;
+let clerkMiddlewareFn = (req, _res, next) => next();
+try {
+  const haveKeys = !!(process.env.CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY);
+  if (haveKeys) {
+    const { clerkMiddleware } = require('@clerk/express');
+    clerkMiddlewareFn = clerkMiddleware();
+    clerkReady = true;
+    console.log('[startup] Clerk middleware enabled');
+  } else {
+    console.warn('[startup] Clerk keys missing (CLERK_PUBLISHABLE_KEY / CLERK_SECRET_KEY). Auth will fallback to legacy JWT only.');
+  }
+} catch (e) {
+  console.warn('[startup] @clerk/express not initialized:', e.message);
+}
 
 // Ensure temp dir exists
 fs.mkdirSync(config.uploads.tempDir, { recursive: true });
@@ -20,6 +36,12 @@ app.use((req, res, next) => {
   res.setTimeout(120000);
   next();
 });
+
+// Register Clerk middleware early so downstream auth() middleware can call getAuth safely
+app.use(clerkMiddlewareFn);
+if (!clerkReady) {
+  console.warn('Clerk middleware running in NO-OP mode (missing keys). Set CLERK_PUBLISHABLE_KEY & CLERK_SECRET_KEY then restart.');
+}
 
 app.get("/ping", async (req, res) => {
   try {

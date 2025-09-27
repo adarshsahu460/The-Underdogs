@@ -32,10 +32,13 @@ async function resolveClerkUser(userId) {
 function auth(required = true) {
   return async (req, res, next) => {
     try {
-      const { userId } = getAuth(req);
-      if (userId) {
-        req.user = await resolveClerkUser(userId);
-        return next();
+      const haveClerkKeys = !!(process.env.CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY);
+      if (haveClerkKeys) {
+        const { userId } = getAuth(req);
+        if (userId) {
+          req.user = await resolveClerkUser(userId);
+          return next();
+        }
       }
       // Legacy fallback JWT (remove once migration complete)
       const header = req.headers.authorization || '';

@@ -1,7 +1,7 @@
-EngiVerse – Marketplace for Unfinished Engineering Projects
+Dev-Yard – Marketplace for Unfinished Engineering Projects
 ================================================================
 
-Turn abandoned student side‑projects into collaborative, evolving open assets. EngiVerse lets students upload dormant codebases (ZIP/S3/GitHub), automatically analyzes them with AI to produce a Health Report + Continuation Roadmap, and enables other contributors to adopt, extend, and document progress through verifiable contribution sessions.
+Turn abandoned student side‑projects into collaborative, evolving open assets. Dev-Yard lets students upload dormant codebases (ZIP/S3/GitHub), automatically analyzes them with AI to produce a Health Report + Continuation Roadmap, and enables other contributors to adopt, extend, and document progress through verifiable contribution sessions.
 
 Core Vision / USP
 -----------------

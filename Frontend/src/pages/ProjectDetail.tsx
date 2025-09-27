@@ -79,6 +79,21 @@ const ProjectDetail = () => {
   );
   type FeedbackItem = { text: string; user: string; createdAt: string };
   const [localFeedback, setLocalFeedback] = useState<FeedbackItem[]>([]);
+  // Streaming helpers state
+  const [streamingSummary, setStreamingSummary] = useState('');
+  const [streamStatus, setStreamStatus] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState(false);
+  (window as any).startStreamingReanalysis = () => {
+    if (!id || streaming) return;
+    setStreaming(true);
+    setStreamingSummary('');
+    setStreamStatus('Starting');
+    const es = new EventSource(`https://debrah-transpleural-bailey.ngrok-free.dev/api/projects/${id}/stream/reanalyze`);
+    es.addEventListener('status', (e: MessageEvent) => { try { const d = JSON.parse(e.data); setStreamStatus(d.phase || 'Working'); } catch {} });
+    es.addEventListener('summary-chunk', (e: MessageEvent) => { try { const d = JSON.parse(e.data); if (d.text) setStreamingSummary((prev:string) => prev + d.text); } catch {} });
+    es.addEventListener('complete', () => { setStreamStatus('Complete'); setStreaming(false); es.close(); });
+    es.addEventListener('error', () => { setStreamStatus('Error'); setStreaming(false); es.close(); });
+  };
 
   // Helper: extract a YouTube embed URL from common YouTube link formats
   const getYouTubeEmbedUrl = (rawUrl?: string | null): string | null => {
@@ -571,6 +586,7 @@ const ProjectDetail = () => {
                 { id: "ai-insights", label: "AI Insights", icon: Zap },
                 { id: "analysed-diff", label: "Analysed Diff", icon: Target },
                 { id: "timeline", label: "Timeline", icon: TrendingUp },
+                { id: "health-history", label: "Health History", icon: TrendingUp },
                 { id: "feedback", label: "Feedback", icon: MessageSquare },
                 { id: "contributors", label: "Contributors", icon: Users },
               ].map((tab) => (
@@ -678,6 +694,18 @@ const ProjectDetail = () => {
                       AI Project Health Report
                     </h3>
                   </div>
+                  <div className="flex gap-4 mb-4 items-center">
+                    <button
+                      onClick={() => (window as any).startStreamingReanalysis?.()}
+                      className="px-4 py-2 text-sm rounded bg-blue-600 text-white"
+                    >Re-Analyze (Stream)</button>
+                    {streamStatus && <span className="text-xs text-gray-600">{streamStatus}</span>}
+                  </div>
+                  {streamingSummary && (
+                    <div className="mb-4 p-3 bg-white border rounded text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto">
+                      {streamingSummary}
+                    </div>
+                  )}
                   {healthReport ? (
                     <div className="bg-white rounded-lg p-4">
                       <h4 className="font-medium text-gray-900 mb-3">

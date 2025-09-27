@@ -89,7 +89,7 @@ const LandingPage = () => {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-2">
               <Code className="h-8 w-8 text-blue-600" />
-              <span className="text-xl font-bold text-gray-900">CodeRevive</span>
+              <span className="text-xl font-bold text-gray-900">Dev-Yard</span>
             </div>
             <div className="hidden md:flex items-center space-x-6">
               <Link to="/browse" className="text-gray-600 hover:text-blue-600 transition-colors">Browse</Link>
@@ -215,7 +215,7 @@ const LandingPage = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <div className="inline-block bg-gradient-to-r from-blue-100 to-purple-100 rounded-full px-6 py-2 text-blue-600 font-medium mb-4">
-              How CodeRevive Works
+              How Dev-Yard Works
             </div>
             <h2 className="text-4xl lg:text-5xl font-bold text-gray-900 mb-6">
               Transforming abandoned code into collaborative success stories
@@ -351,7 +351,7 @@ const LandingPage = () => {
             <div>
               <div className="flex items-center space-x-2 mb-4">
                 <Code className="h-8 w-8 text-blue-400" />
-                <span className="text-xl font-bold">CodeRevive</span>
+                <span className="text-xl font-bold">Dev-Yard</span>
               </div>
               <p className="text-gray-400">
                 Giving abandoned projects a second chance to become something amazing.
@@ -386,7 +386,7 @@ const LandingPage = () => {
             </div>
           </div>
           <div className="border-t border-gray-800 pt-8 mt-8 text-center text-gray-400">
-            <p>&copy; 2024 CodeRevive. All rights reserved. Made with ❤️ for the developer community.</p>
+            <p>&copy; 2024 Dev-Yard. All rights reserved. Made with ❤️ for the developer community.</p>
           </div>
         </div>
       </footer>

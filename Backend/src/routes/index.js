@@ -6,7 +6,7 @@ const prisma = require('../models/db');
 const router = Router();
 
 router.get('/', (req, res) => {
-  res.json({ message: 'EngiVerse API', docs: 'TBD' });
+  res.json({ message: 'Dev-Yard API', docs: 'TBD' });
 });
 // router.post('/upload', (req, res) => {
 //   console.log(req.body);

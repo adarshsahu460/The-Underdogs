@@ -10,7 +10,7 @@ from runner import run_command, detect_project_type, check_for_test_files
 from langchain_ollama import OllamaLLM as Ollama
 from git import Repo, GitCommandError
 
-app = FastAPI(title="EngiVerse AI Analyzer API")
+app = FastAPI(title="Dev-Yard AI Analyzer API")
 
 # Initialize the LLM - CodeLlama 7B provides high-quality, detailed summaries
 llm = Ollama(model="codellama:7b")
@@ -54,7 +54,7 @@ class AnalyzeDiffRequest(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the EngiVerse AI Analyzer API!"}
+    return {"message": "Welcome to the Dev-Yard AI Analyzer API!"}
 
 @app.post("/analyze-repository")
 def analyze_repository(request: AnalyzeRequest):
@@ -88,7 +88,7 @@ def analyze_repository(request: AnalyzeRequest):
         code_content = read_project_files(temp_dir)
         
         summary_prompt = f"""
-        You are an expert developer and project manager, tasked with analyzing an unfinished project to attract new contributors on the 'EngiVerse' platform. 
+        You are an expert developer and project manager, tasked with analyzing an unfinished project to attract new contributors on the 'Dev-Yard' platform. 
         Your goal is to generate a structured JSON object that provides a comprehensive overview.
 
         <CONTEXT>

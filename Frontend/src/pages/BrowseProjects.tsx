@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Search, Code } from "lucide-react";
 import ProjectCard from "../components/ProjectCard";
 
@@ -62,6 +62,8 @@ const BrowseProjects = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [reasonFilter, setReasonFilter] = useState("");
+  const [serverSearching, setServerSearching] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const categories = [
     "Web Development",
@@ -151,7 +153,8 @@ const BrowseProjects = () => {
   const filterProjects = useCallback(() => {
     let filtered = Array.isArray(projects) ? [...projects] : [];
 
-    if (searchTerm) {
+    // Client filtering only applies when server search empty
+    if (searchTerm && !serverSearching) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter((project) => {
         const inTitle = project.title.toLowerCase().includes(term);
@@ -163,9 +166,7 @@ const BrowseProjects = () => {
             inLang = langs.some((l) => String(l).toLowerCase().includes(term));
           }
         } catch {
-          inLang = String(project.languages || "")
-            .toLowerCase()
-            .includes(term);
+          inLang = String(project.languages || '').toLowerCase().includes(term);
         }
         return inTitle || inDesc || inLang;
       });
@@ -184,6 +185,54 @@ const BrowseProjects = () => {
   useEffect(() => {
     filterProjects();
   }, [filterProjects]);
+
+  // Debounced server-side search
+  useEffect(() => {
+    const term = searchTerm.trim();
+    if (!term) {
+      setServerSearching(false);
+      return;
+    }
+    setServerSearching(true);
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`https://debrah-transpleural-bailey.ngrok-free.dev/api/projects/search?q=${encodeURIComponent(term)}`, {
+          headers: { 'ngrok-skip-browser-warning': 'true', Accept: 'application/json' },
+          signal: controller.signal
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.projects)) {
+            // Map server search result shape to Project shape best-effort
+            const mapped: Project[] = data.projects.map((p: any) => ({
+              id: p.id,
+              title: p.title || 'Untitled Project',
+              description: p.description || '',
+              category: 'Other',
+              languages: JSON.stringify([]),
+              originalRepoUrl: '',
+              s3ObjectUrl: '',
+              reasonHalted: 'Other',
+              aiSummary: p.aiSummary,
+              links: { },
+              collaboratorEmails: [],
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }));
+            setFilteredProjects(mapped);
+          }
+        }
+      } catch (e) {
+        // ignore (user typing quickly / aborted)
+      } finally {
+        setServerSearching(false);
+      }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
 
   const clearFilters = () => {
     setSearchTerm("");
@@ -267,8 +316,9 @@ const BrowseProjects = () => {
         </div>
 
         {/* Results */}
-        <div className="mb-4 text-gray-600">
-          Found {list.length} project{list.length !== 1 ? "s" : ""}
+        <div className="mb-4 text-gray-600 flex items-center gap-3">
+          <span>Found {list.length} project{list.length !== 1 ? 's' : ''}</span>
+          {serverSearching && <span className="text-xs text-blue-600 animate-pulse">Searching...</span>}
         </div>
 
         {/* Projects Grid */}

@@ -162,8 +162,11 @@ async function uploadS3Zip(req, res) {
   const s3Url = body.projectFileUrl || body.s3Url;
   if (!s3Url) return res.status(400).json({ error: 'projectFileUrl required' });
   if (!/\.zip($|\?)/i.test(s3Url)) return res.status(400).json({ error: 'URL must reference a .zip' });
-  // Auth optional: if not provided, userId null (must handle upstream if required)
-  const userId = (req.user && req.user.id) || null;
+  // Auth now REQUIRED because Project.owner is a mandatory relation (ownerUserId cannot be null)
+  if (!req.user || !req.user.id) {
+    return res.status(401).json({ error: 'Authentication required to import project' });
+  }
+  const userId = req.user.id;
   let parsed;
   try { parsed = parseS3ObjectUrl(s3Url); } catch (e) { return res.status(400).json({ error: e.message }); }
   const region = config.s3.region || process.env.S3_REGION;
@@ -274,7 +277,7 @@ async function uploadS3Zip(req, res) {
 }
 
 async function analyzeProject(req, res) {
-  const id = Number(req.params.id);
+  const id = req.params.projectId || req.params.id; // support either param name; IDs are cuid strings
   const project = await prisma.project.findUnique({ where: { id } });
   if (!project) return res.status(404).json({ error: 'Project not found' });
   if (project.ownerUserId !== req.user.id) {
@@ -299,7 +302,7 @@ async function analyzeProject(req, res) {
 }
 
 async function adoptProject(req, res) {
-  const id = Number(req.params.id);
+  const id = req.params.projectId || req.params.id; // cuid string
   try {
     const project = await prisma.project.findUnique({ where: { id } });
     if (!project) return res.status(404).json({ error: 'Not found' });
@@ -349,7 +352,100 @@ async function getProject(req, res) {
   }
 }
 
-module.exports = { listProjects, listProjectsRaw, uploadZip, uploadGitHubUrl, analyzeProject, adoptProject, uploadS3Zip, getProject };
+// Full text search endpoint using raw SQL for flexibility
+async function searchProjects(req, res) {
+  const q = (req.query.q || '').toString().trim();
+  if (!q) return res.json({ projects: [] });
+  try {
+    // Use plainto_tsquery for simplicity; could switch to websearch_to_tsquery for richer syntax.
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT id, title, description, "botRepoFullName" as "botRepoFullName", "aiSummary", keywords,
+              ts_rank("searchVector", plainto_tsquery('english', $1)) AS rank
+         FROM "Project"
+        WHERE "searchVector" @@ plainto_tsquery('english', $1)
+        ORDER BY rank DESC
+        LIMIT 50`, q
+    );
+    res.json({ projects: rows });
+  } catch (e) {
+    console.error('[searchProjects]', e);
+    res.status(500).json({ error: 'Search failed' });
+  }
+}
+
+// Health timeline from AiReport history (last N entries)
+async function getHealthTimeline(req, res) {
+  const projectId = req.params.projectId;
+  try {
+    const reports = await prisma.aiReport.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'asc' },
+      take: 100
+    });
+    const timeline = reports.map(r => {
+      let health = null;
+      if (r.report && typeof r.report === 'object') {
+        health = r.report.health || r.report.health_report || null;
+      }
+      return {
+        id: r.id,
+        createdAt: r.createdAt,
+        health,
+      };
+    });
+    res.json({ projectId, timeline });
+  } catch (e) {
+    console.error('[getHealthTimeline]', e);
+    res.status(500).json({ error: 'Failed to load health timeline' });
+  }
+}
+
+// Streaming re-analysis (Server-Sent Events) for updated summary
+async function streamReanalyze(req, res) {
+  const id = req.params.projectId;
+  const project = await prisma.project.findUnique({ where: { id }, select: { botRepoFullName: true } });
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  // Setup SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+  function send(evt, data) {
+    res.write(`event: ${evt}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  }
+  try {
+    send('status', { phase: 'fetching' });
+    // Call existing requestAnalysis (non-stream) then break into chunks for UI
+    const report = await requestAnalysis(project.botRepoFullName);
+    send('status', { phase: 'analyzed' });
+    // Normalize and persist
+    const norm = normalizeAiReport(report);
+    await prisma.project.update({ where: { id }, data: {
+      aiSummary: norm.summaryString,
+      aiHealth: norm.healthString,
+      aiNextSteps: norm.nextSteps,
+      aiLastGeneratedAt: new Date(),
+      keywords: norm.keywords
+    }});
+    await prisma.aiReport.create({ data: { projectId: id, report } });
+    // Stream chunks of summary if large
+    if (norm.summaryString) {
+      const chunkSize = 400;
+      for (let i = 0; i < norm.summaryString.length; i += chunkSize) {
+        const part = norm.summaryString.slice(i, i + chunkSize);
+        send('summary-chunk', { text: part });
+      }
+    }
+    send('complete', { normalized: norm });
+    res.end();
+  } catch (e) {
+    send('error', { message: e.message });
+    res.end();
+  }
+}
+
+module.exports = { listProjects, listProjectsRaw, uploadZip, uploadGitHubUrl, analyzeProject, adoptProject, uploadS3Zip, getProject, searchProjects, getHealthTimeline, streamReanalyze };
 // Additional helper to parse aiHealth string into structured object (for new health endpoint)
 function parseHealthString(str) {
   if (!str) return null;
@@ -383,3 +479,5 @@ async function getProjectHealth(req, res) {
 }
 
 module.exports.getProjectHealth = getProjectHealth;
+module.exports.getHealthTimeline = getHealthTimeline;
+module.exports.streamReanalyze = streamReanalyze;
